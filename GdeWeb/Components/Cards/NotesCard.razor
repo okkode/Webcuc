@@ -1,0 +1,162 @@
+@using MudBlazor
+@using GdeWeb.Interfaces
+@using GdeWebModels
+@using GdeWeb.Dialogs
+@inject INoteService NoteService
+@inject IDialogService DialogService
+@inject ISnackbarService SnackbarService
+
+<MudPaper Class="pa-4" Elevation="2">
+    <MudStack>
+        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+            <MudText Typo="Typo.h6">Jegyzeteim</MudText>
+            <MudButton Variant="Variant.Filled" 
+                      Color="Color.Primary" 
+                      Size="Size.Small"
+                      StartIcon="@Icons.Material.Filled.Add"
+                      OnClick="OpenNewNoteDialog">
+                Új jegyzet
+            </MudButton>
+        </MudStack>
+
+        @if (isLoading)
+        {
+            <MudProgressLinear Indeterminate="true" Class="mt-2" />
+        }
+        else if (notes.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mt-4" Align="Align.Center">
+                Még nincs jegyzet. Hozz létre egy újat!
+            </MudText>
+        }
+        else
+        {
+            <div class="mt-2">
+                @foreach (var note in notes)
+                {
+                    <MudPaper Class="pa-2 mb-2" Elevation="1" Style="cursor: pointer;" @onclick="@(() => OpenEditNoteDialog(note))">
+                        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                            <MudStack>
+                                <MudText Typo="Typo.subtitle1" Class="font-weight-bold">@note.NoteTitle</MudText>
+                                <MudText Typo="Typo.caption" Class="text-muted">
+                                    @note.ModificationDate.ToString("yyyy.MM.dd HH:mm")
+                                </MudText>
+                            </MudStack>
+                            <div @onclick:stopPropagation="true">
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" 
+                                              Color="Color.Error" 
+                                              Size="Size.Small"
+                                              OnClick="@(() => DeleteNote(note))" />
+                            </div>
+                        </MudStack>
+                    </MudPaper>
+                }
+            </div>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter] public int CourseId { get; set; }
+
+    private List<NoteModel> notes = new List<NoteModel>();
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadNotes();
+    }
+
+    private async Task LoadNotes()
+    {
+        isLoading = true;
+        try
+        {
+            var result = await NoteService.GetCourseNotes(CourseId);
+            if (result.Result.Success)
+            {
+                notes = result.NoteList;
+            }
+            else
+            {
+                SnackbarService.ShowSnackbar(Severity.Error, $"Hiba a jegyzetek betöltésekor: {result.Result.ErrorMessage}", 5000);
+            }
+        }
+        catch (Exception ex)
+        {
+            SnackbarService.ShowSnackbar(Severity.Error, $"Hiba történt: {ex.Message}", 5000);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task OpenNewNoteDialog()
+    {
+        var parameters = new DialogParameters
+        {
+            ["CourseId"] = CourseId
+        };
+
+        var dialog = await DialogService.ShowAsync<NoteDialog>("Új jegyzet", parameters);
+        var result = await dialog.Result;
+
+        if (!result.Canceled)
+        {
+            await LoadNotes();
+        }
+    }
+
+    private async Task OpenEditNoteDialog(NoteModel note)
+    {
+        var parameters = new DialogParameters
+        {
+            ["CourseId"] = CourseId,
+            ["ExistingNote"] = note
+        };
+
+        var dialog = await DialogService.ShowAsync<NoteDialog>("Jegyzet szerkesztése", parameters);
+        var result = await dialog.Result;
+
+        if (!result.Canceled)
+        {
+            await LoadNotes();
+        }
+    }
+
+    private async Task DeleteNote(NoteModel note)
+    {
+        var parameters = new DialogParameters
+        {
+            ["ContentText"] = $"Biztosan törölni szeretnéd a '{note.NoteTitle}' című jegyzetet?",
+            ["ButtonText"] = "Törlés",
+            ["Color"] = Color.Error
+        };
+
+        var dialog = await DialogService.ShowAsync<UpdateDialog>("Jegyzet törlése", parameters);
+        var result = await dialog.Result;
+
+        if (!result.Canceled)
+        {
+            try
+            {
+                var deleteResult = await NoteService.DeleteNote(note.NoteId);
+                if (deleteResult.Success)
+                {
+                    SnackbarService.ShowSnackbar(Severity.Success, "Jegyzet sikeresen törölve!", 3000);
+                    await LoadNotes();
+                }
+                else
+                {
+                    SnackbarService.ShowSnackbar(Severity.Error, $"Hiba történt: {deleteResult.ErrorMessage}", 5000);
+                }
+            }
+            catch (Exception ex)
+            {
+                SnackbarService.ShowSnackbar(Severity.Error, $"Hiba történt: {ex.Message}", 5000);
+            }
+        }
+    }
+}
+

@@ -1,0 +1,231 @@
+@page "/summaries"
+@using MudBlazor
+@using GdeWeb.Interfaces
+@using GdeWeb.Components.Layout
+@using GdeWeb.Dialogs
+@using GdeWebModels
+@inject INoteService NoteService
+@inject ISnackbarService SnackbarService
+@inject IDialogService DialogService
+
+<PageTitle>Havi összefoglalók</PageTitle>
+
+<div class="page-container">
+    @if (!pageLoading)
+    {
+        <BlazorAnimate.Animate Animation="Animations.FadeIn" Duration="@TimeSpan.FromSeconds(0.3)">
+            <MudContainer MaxWidth="MaxWidth.Large" Class="mt-4">
+                <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center" Class="mb-4">
+                    <MudText Typo="Typo.h4">Havi összefoglalók</MudText>
+                    <MudButton Variant="Variant.Filled" 
+                              Color="Color.Primary" 
+                              StartIcon="@Icons.Material.Filled.AutoAwesome"
+                              OnClick="ShowGenerateDialog"
+                              Disabled="@isGenerating">
+                        @if (isGenerating)
+                        {
+                            <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
+                        }
+                        Összefoglaló generálása
+                    </MudButton>
+                </MudStack>
+                <MudText Typo="Typo.body1" Class="mb-4">
+                    Az AI automatikusan generálja a havi összefoglalókat a jegyzeteid alapján minden hónap első napján. 
+                    Manuálisan is generálhatsz összefoglalót a fenti gombbal.
+                </MudText>
+
+                @if (summaries.Count == 0)
+                {
+                    <MudPaper Class="pa-4" Elevation="2">
+                        <MudText Typo="Typo.body1" Align="Align.Center">
+                            Még nincs összefoglaló. Az első összefoglaló a következő hónap első napján jön létre.
+                        </MudText>
+                    </MudPaper>
+                }
+                else
+                {
+                    <MudTimeline>
+                        @foreach (var summary in summaries)
+                        {
+                            <MudTimelineItem Size="Size.Large" Color="Color.Primary">
+                                <ItemContent>
+                                    <MudPaper Class="pa-4 mb-4" Elevation="2">
+                                        <MudStack>
+                                            <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                                                <MudText Typo="Typo.h6">
+                                                    @GetMonthName(summary.Month) @summary.Year
+                                                </MudText>
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Filled">
+                                                    @summary.CreationDate.ToString("yyyy.MM.dd")
+                                                </MudChip>
+                                            </MudStack>
+
+                                            <MudExpansionPanels MultiExpansion="false" Class="mt-2">
+                                                <MudExpansionPanel Text="Összefoglaló">
+                                                    <div class="summary-content">
+                                                        @if (!string.IsNullOrEmpty(summary.Summary))
+                                                        {
+                                                            @((MarkupString)summary.Summary)
+                                                        }
+                                                        else
+                                                        {
+                                                            <MudText Typo="Typo.body2" Class="text-muted">
+                                                                Összefoglaló nem elérhető.
+                                                            </MudText>
+                                                        }
+                                                    </div>
+                                                </MudExpansionPanel>
+
+                                                <MudExpansionPanel Text="Mit tanultál ebben a hónapban?">
+                                                    <div class="summary-content">
+                                                        @if (!string.IsNullOrEmpty(summary.WhatLearned))
+                                                        {
+                                                            @((MarkupString)summary.WhatLearned)
+                                                        }
+                                                        else
+                                                        {
+                                                            <MudText Typo="Typo.body2" Class="text-muted">
+                                                                Nincs információ.
+                                                            </MudText>
+                                                        }
+                                                    </div>
+                                                </MudExpansionPanel>
+
+                                                <MudExpansionPanel Text="Mit mutattak be a diákok?">
+                                                    <div class="summary-content">
+                                                        @if (!string.IsNullOrEmpty(summary.WhatPresented))
+                                                        {
+                                                            @((MarkupString)summary.WhatPresented)
+                                                        }
+                                                        else
+                                                        {
+                                                            <MudText Typo="Typo.body2" Class="text-muted">
+                                                                Nincs információ.
+                                                            </MudText>
+                                                        }
+                                                    </div>
+                                                </MudExpansionPanel>
+                                            </MudExpansionPanels>
+                                        </MudStack>
+                                    </MudPaper>
+                                </ItemContent>
+                            </MudTimelineItem>
+                        }
+                    </MudTimeline>
+                }
+            </MudContainer>
+        </BlazorAnimate.Animate>
+    }
+    else
+    {
+        <div class="loading-center">
+            <MudProgressCircular Color="Color.Secondary" Indeterminate="true" />
+        </div>
+    }
+</div>
+
+<style>
+    .summary-content {
+        padding: 16px;
+        line-height: 1.6;
+    }
+
+    .summary-content h1, .summary-content h2, .summary-content h3 {
+        margin-top: 16px;
+        margin-bottom: 8px;
+    }
+
+    .summary-content p {
+        margin-bottom: 12px;
+    }
+
+    .summary-content ul, .summary-content ol {
+        margin-left: 24px;
+        margin-bottom: 12px;
+    }
+</style>
+
+@code {
+    [CascadingParameter]
+    public MainLayout MainLayout { get; set; } = default!;
+
+    private bool pageLoading = true;
+    private bool isGenerating = false;
+    private List<MonthlySummaryModel> summaries = new List<MonthlySummaryModel>();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            pageLoading = false;
+            await LoadSummaries();
+            StateHasChanged();
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private async Task LoadSummaries()
+    {
+        try
+        {
+            var result = await NoteService.GetUserMonthlySummaries();
+            if (result.Result.Success)
+            {
+                summaries = result.SummaryList;
+            }
+            else
+            {
+                SnackbarService.ShowSnackbar(Severity.Error, $"Hiba az összefoglalók betöltésekor: {result.Result.ErrorMessage}", 5000);
+            }
+        }
+        catch (Exception ex)
+        {
+            SnackbarService.ShowSnackbar(Severity.Error, $"Hiba történt: {ex.Message}", 5000);
+        }
+    }
+
+    private string GetMonthName(int month)
+    {
+        return month switch
+        {
+            1 => "Január",
+            2 => "Február",
+            3 => "Március",
+            4 => "Április",
+            5 => "Május",
+            6 => "Június",
+            7 => "Július",
+            8 => "Augusztus",
+            9 => "Szeptember",
+            10 => "Október",
+            11 => "November",
+            12 => "December",
+            _ => month.ToString()
+        };
+    }
+
+    private async Task ShowGenerateDialog()
+    {
+        var parameters = new DialogParameters
+        {
+            ["Year"] = DateTime.Now.Year,
+            ["Month"] = DateTime.Now.Month
+        };
+
+        var options = new DialogOptions
+        {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true
+        };
+
+        var dialog = await DialogService.ShowAsync<GenerateSummaryDialog>("Összefoglaló generálása", parameters, options);
+        var result = await dialog.Result;
+
+        if (result != null && !result.Canceled)
+        {
+            await LoadSummaries();
+        }
+    }
+}
+

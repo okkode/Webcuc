@@ -1,0 +1,137 @@
+@using MudBlazor
+@using GdeWeb.Components.Layout
+@using GdeWeb.Interfaces
+@using GdeWebModels
+@inject INoteService NoteService
+@inject ISnackbarService SnackbarService
+@inject ITrainingService TrainingService
+
+<MudDialog>
+    <DialogContent>
+        <MudContainer>
+            <MudText Typo="Typo.h6" Class="mb-3">Összes jegyzet</MudText>
+
+            @if (isLoading)
+            {
+                <MudProgressLinear Indeterminate="true" Class="mt-2" />
+            }
+            else if (notes.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Class="mt-4" Align="Align.Center">
+                    Még nincs jegyzet. Hozz létre egy újat egy kurzus megtekintésekor!
+                </MudText>
+            }
+            else
+            {
+                <MudTimeline>
+                    @foreach (var note in notes)
+                    {
+                        <MudTimelineItem Size="Size.Medium" Color="Color.Primary">
+                            <ItemContent>
+                                <MudPaper Class="pa-3 mb-2" Elevation="1">
+                                    <MudStack>
+                                        <MudStack Row="true" Justify="Justify.SpaceBetween" AlignItems="AlignItems.Center">
+                                            <MudText Typo="Typo.subtitle1" Class="font-weight-bold">@note.NoteTitle</MudText>
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">
+                                                @GetCourseTitle(note.CourseId)
+                                            </MudChip>
+                                        </MudStack>
+                                        <MudText Typo="Typo.caption" Class="text-muted mb-2">
+                                            @note.ModificationDate.ToString("yyyy.MM.dd HH:mm")
+                                        </MudText>
+                                        <MudText Typo="Typo.body2" Class="note-preview">
+                                            @(note.NoteContent.Length > 150 ? note.NoteContent.Substring(0, 150) + "..." : note.NoteContent)
+                                        </MudText>
+                                        <MudStack Row="true" Justify="Justify.FlexEnd" Spacing="2" Class="mt-2">
+                                            <MudButton Variant="Variant.Text" 
+                                                      Size="Size.Small" 
+                                                      StartIcon="@Icons.Material.Filled.Visibility"
+                                                      OnClick="@(() => ViewCourse(note.CourseId))">
+                                                Kurzus megtekintése
+                                            </MudButton>
+                                        </MudStack>
+                                    </MudStack>
+                                </MudPaper>
+                            </ItemContent>
+                        </MudTimelineItem>
+                    }
+                </MudTimeline>
+            }
+        </MudContainer>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Close">Bezárás</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .note-preview {
+        max-height: 100px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+</style>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [CascadingParameter] public MainLayout MainLayout { get; set; } = default!;
+
+    private List<NoteModel> notes = new List<NoteModel>();
+    private bool isLoading = true;
+    private Dictionary<int, string> courseTitles = new Dictionary<int, string>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadNotes();
+    }
+
+    private async Task LoadNotes()
+    {
+        isLoading = true;
+        try
+        {
+            var result = await NoteService.GetUserNotes();
+            if (result.Result.Success)
+            {
+                notes = result.NoteList;
+                
+                // Load course titles
+                var courseList = await TrainingService.GetCourseList();
+                if (courseList.Result.Success)
+                {
+                    foreach (var course in courseList.CourseList)
+                    {
+                        courseTitles[course.CourseId] = course.CourseTitle;
+                    }
+                }
+            }
+            else
+            {
+                SnackbarService.ShowSnackbar(Severity.Error, $"Hiba a jegyzetek betöltésekor: {result.Result.ErrorMessage}", 5000);
+            }
+        }
+        catch (Exception ex)
+        {
+            SnackbarService.ShowSnackbar(Severity.Error, $"Hiba történt: {ex.Message}", 5000);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private string GetCourseTitle(int courseId)
+    {
+        return courseTitles.TryGetValue(courseId, out var title) ? title : $"Kurzus #{courseId}";
+    }
+
+    private async Task ViewCourse(int courseId)
+    {
+        MudDialog.Close();
+        var course = new CourseModel { CourseId = courseId };
+        await MainLayout.ShowCourseViewDialog(course);
+    }
+
+    private void Close() => MudDialog.Close();
+}
+

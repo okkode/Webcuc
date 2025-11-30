@@ -1,0 +1,129 @@
+@using MudBlazor
+@using GdeWeb.Interfaces
+@using GdeWebModels
+@inject INoteService NoteService
+@inject ISnackbarService SnackbarService
+
+<MudDialog>
+    <DialogContent>
+        <MudContainer>
+            <MudText Typo="Typo.h6" Class="mb-3">Válassz hónapot és évet</MudText>
+            <MudText Typo="Typo.body2" Class="mb-4">
+                Az összefoglaló a kiválasztott hónap jegyzeteiből készül.
+            </MudText>
+
+            <MudNumericField @bind-Value="selectedYear"
+                            Label="Év"
+                            Min="2020"
+                            Max="@DateTime.Now.Year"
+                            Variant="Variant.Outlined"
+                            FullWidth="true"
+                            Margin="Margin.Normal" />
+
+            <MudSelect T="int" 
+                      @bind-Value="selectedMonth"
+                      Label="Hónap"
+                      Variant="Variant.Outlined"
+                      FullWidth="true"
+                      Margin="Margin.Normal">
+                @foreach (var month in months)
+                {
+                    <MudSelectItem T="int" Value="@month.Key">@month.Value</MudSelectItem>
+                }
+            </MudSelect>
+
+            @if (isGenerating)
+            {
+                <MudProgressLinear Indeterminate="true" Class="mt-2" />
+                <MudText Typo="Typo.body2" Class="mt-2" Align="Align.Center">
+                    Az AI generálja az összefoglalót... Ez eltarthat néhány másodpercig.
+                </MudText>
+            }
+        </MudContainer>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Outlined" Color="Color.Default" OnClick="Cancel" Disabled="@isGenerating">Mégsem</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Generate" Disabled="@isGenerating">
+            @if (isGenerating)
+            {
+                <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
+            }
+            Generálás
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public int Year { get; set; } = DateTime.Now.Year;
+    [Parameter] public int Month { get; set; } = DateTime.Now.Month;
+
+    private int selectedYear;
+    private int selectedMonth;
+    private bool isGenerating = false;
+
+    private Dictionary<int, string> months = new Dictionary<int, string>
+    {
+        { 1, "Január" },
+        { 2, "Február" },
+        { 3, "Március" },
+        { 4, "Április" },
+        { 5, "Május" },
+        { 6, "Június" },
+        { 7, "Július" },
+        { 8, "Augusztus" },
+        { 9, "Szeptember" },
+        { 10, "Október" },
+        { 11, "November" },
+        { 12, "December" }
+    };
+
+    protected override void OnInitialized()
+    {
+        selectedYear = Year;
+        selectedMonth = Month;
+    }
+
+    private async Task Generate()
+    {
+        if (selectedYear < 2020 || selectedYear > DateTime.Now.Year)
+        {
+            SnackbarService.ShowSnackbar(Severity.Warning, "Kérlek válassz érvényes évet!", 3000);
+            return;
+        }
+
+        if (selectedMonth < 1 || selectedMonth > 12)
+        {
+            SnackbarService.ShowSnackbar(Severity.Warning, "Kérlek válassz érvényes hónapot!", 3000);
+            return;
+        }
+
+        isGenerating = true;
+        StateHasChanged();
+
+        try
+        {
+            var result = await NoteService.GenerateMonthlySummary(selectedYear, selectedMonth);
+            if (result.Result.Success)
+            {
+                SnackbarService.ShowSnackbar(Severity.Success, $"Sikeresen generáltuk az összefoglalót {selectedYear}.{selectedMonth:00} hónapra!", 5000);
+                MudDialog.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                SnackbarService.ShowSnackbar(Severity.Error, $"Hiba történt: {result.Result.ErrorMessage}", 5000);
+            }
+        }
+        catch (Exception ex)
+        {
+            SnackbarService.ShowSnackbar(Severity.Error, $"Hiba történt: {ex.Message}", 5000);
+        }
+        finally
+        {
+            isGenerating = false;
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}
+
