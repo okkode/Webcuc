@@ -31,13 +31,11 @@
   </ItemGroup>
 
 	<ItemGroup Condition="'$(Configuration)'=='Debug'">
-		<MauiAsset Include="wwwroot\js\css-version.debug.js"
-				   LogicalName="wwwroot\js\css-version.js" />
+		<MauiAsset Include="wwwroot\js\css-version.debug.js" LogicalName="wwwroot\js\css-version.js" />
 	</ItemGroup>
 
 	<ItemGroup Condition="'$(Configuration)'!='Debug'">
-		<MauiAsset Include="wwwroot\js\css-version.release.js"
-				   LogicalName="wwwroot\js\css-version.js" />
+		<MauiAsset Include="wwwroot\js\css-version.release.js" LogicalName="wwwroot\js\css-version.js" />
 	</ItemGroup>
 
 </Project>

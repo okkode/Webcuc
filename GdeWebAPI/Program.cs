@@ -14,6 +14,7 @@ using System.Reflection;
 using System.Threading.RateLimiting;
 using Microsoft.Extensions.Logging;
 
+
 namespace GdeWebAPI
 {
     /// <summary>
@@ -92,6 +93,9 @@ namespace GdeWebAPI
             builder.Services.AddScoped<IUserService, UserService>();
             builder.Services.AddScoped<ITrainingService, TrainingService>();
             builder.Services.AddScoped<INoteService, NoteService>();
+
+            builder.Services.AddScoped<SpeechToTextService>();
+            builder.Services.AddScoped<TextCleaningService>();
 
             // Ha a MailService / LogService is DbContextet használ, azokat is Scoped-ra.
             // Ha nem használ DbContextet és stateless, maradhat Singleton.

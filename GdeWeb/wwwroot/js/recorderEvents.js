@@ -1,108 +1,155 @@
-﻿window.AudioContext = window.AudioContext || window.webkitAudioContext;
-
-let mediaRecorder;
+﻿// Hangfelvétel kezelő modul
+let mediaRecorder = null;
 let audioChunks = [];
-let silenceTimer;
-let audioContext;
-let analyser;
-let sourceNode;
+let dotNetHelper = null;
+let recordingInterval = null;
 
-let running = false;
+export function startRecording(dotNetReference) {
+    dotNetHelper = dotNetReference;
+    audioChunks = [];
 
-export async function startRecording(dotNetRef) {
-    try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            throw new Error("getUserMedia not supported");
+    navigator.mediaDevices.getUserMedia({
+        audio: {
+            channelCount: 1,
+            sampleRate: 16000,
+            echoCancellation: true,
+            noiseSuppression: true
         }
-
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-        audioChunks = [];
-        mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.ondataavailable = event => {
-            audioChunks.push(event.data);
-        };
-
-        // AudioContext és hangszint elemzés
-        audioContext = new AudioContext();
-        analyser = audioContext.createAnalyser();
-        sourceNode = audioContext.createMediaStreamSource(stream);
-        sourceNode.connect(analyser);
-        analyser.fftSize = 2048;
-        const dataArray = new Uint8Array(analyser.fftSize);
-
-        running = true;
-        function checkSilence() {
-            if (!running) return;
-            analyser.getByteTimeDomainData(dataArray);
-            const rms = Math.sqrt(dataArray.reduce((sum, value) => {
-                const norm = (value - 128) / 128;
-                return sum + norm * norm;
-            }, 0) / dataArray.length);
-
-            // Ha alacsony a hangerő (pl. < 0.01), akkor újraindítjuk a 3 másodperces időzítőt
-            if (rms > 0.01) {
-                if (silenceTimer) {
-                    clearTimeout(silenceTimer);
-                    silenceTimer = null;
-                }
-            } else {
-                if (!silenceTimer) {
-                    silenceTimer = setTimeout(() => {
-                        //stopRecording();
-                        // A JS oldalon meghívjuk a Blazor metódust
-                        dotNetRef.invokeMethodAsync("OnRecordingStopped", "");
-
-                    }, 1000); // 1 másodperc csend után automatikus leállítás
-                }
+    })
+        .then(stream => {
+            try {
+                mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: 'audio/webm;codecs=opus'
+                });
+            } catch (e) {
+                // Fallback ha a webm nem támogatott
+                mediaRecorder = new MediaRecorder(stream);
             }
 
-            requestAnimationFrame(checkSilence);
-        }
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunks.push(event.data);
+                }
+            };
 
-        requestAnimationFrame(checkSilence);
-        mediaRecorder.start();
+            mediaRecorder.onstop = () => {
+                // Hangfelvétel leállt
+                stream.getTracks().forEach(track => track.stop());
+            };
 
-    } catch (err) {
-        console.error("getUserMedia error", err);
+            mediaRecorder.onerror = (event) => {
+                console.error('MediaRecorder error:', event.error);
+                if (dotNetHelper) {
+                    dotNetHelper.invokeMethodAsync('OnRecordingError',
+                        'Hiba a felvétel során: ' + event.error.name);
+                }
+            };
 
-        let msg = (err.name || "Error") + " " + (err.message || "");
-        if (err.name === "NotReadableError") {
-            msg = "Nem sikerült elindítani a mikrofont. " +
-                "Ellenőrizze, hogy a mikrofon engedélyezve van-e és nem használja-e más alkalmazás.";
-        }
+            // 3 másodperces chunk-ok rögzítése
+            mediaRecorder.start(3000);
 
-        await dotNetRef.invokeMethodAsync("OnRecordingError", msg);
-    }
+            console.log('🎤 Recording started');
+
+            // Auto-stop timeout (max 5 perc)
+            recordingInterval = setTimeout(() => {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    stopRecording(null, null);
+                }
+            }, 300000); // 5 perc
+
+        })
+        .catch(error => {
+            console.error('Microphone access error:', error);
+            if (dotNetHelper) {
+                dotNetHelper.invokeMethodAsync('OnRecordingError',
+                    'Mikrofon hozzáférés megtagadva! Kérlek engedélyezd a beállításokban.');
+            }
+        });
 }
 
-export function stopRecording(apiUrl, accessToken) {
-    running = false;
-    return new Promise((resolve) => {
-        if (silenceTimer) clearTimeout(silenceTimer);
-        if (audioContext) {
-            audioContext.close();
-            audioContext = null;
+export async function stopRecording(apiUrl, accessToken) {
+    return new Promise(async (resolve, reject) => {
+        if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+            resolve('');
+            return;
+        }
+
+        if (recordingInterval) {
+            clearTimeout(recordingInterval);
+            recordingInterval = null;
         }
 
         mediaRecorder.onstop = async () => {
-            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-            audioChunks = [];
-            const formData = new FormData();
-            formData.append('file', audioBlob);
+            try {
+                console.log('🎤 Recording stopped, processing...');
 
-            const response = await fetch(apiUrl + '/api/audio/stt', {
-                method: 'POST',
-                headers: {
-                    'AccessToken': accessToken
-                },
-                body: formData
-            });
+                // Összes chunk egyesítése
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
 
-            const result = await response.json();
-            resolve(result.text);
+                if (audioBlob.size === 0) {
+                    console.warn('Empty audio blob');
+                    resolve('');
+                    return;
+                }
+
+                console.log(`📦 Audio size: ${audioBlob.size} bytes`);
+
+                // FormData készítése
+                const formData = new FormData();
+                formData.append('audioChunk', audioBlob, 'recording.webm');
+                formData.append('language', 'hu');
+                formData.append('cleanText', 'true');
+
+                // API hívás
+                const response = await fetch(`${apiUrl}/api/SpeechToText/transcribe-chunk`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    },
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('API Error:', errorText);
+                    reject(`API hiba: ${response.status} - ${errorText}`);
+                    return;
+                }
+
+                const result = await response.json();
+                console.log('✅ Transcription result:', result);
+
+                if (result && result.text) {
+                    resolve(result.text);
+                } else {
+                    resolve('');
+                }
+
+            } catch (error) {
+                console.error('Error processing audio:', error);
+                reject(error.message);
+            } finally {
+                // Cleanup
+                audioChunks = [];
+                if (mediaRecorder && mediaRecorder.stream) {
+                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                }
+                mediaRecorder = null;
+            }
         };
 
         mediaRecorder.stop();
     });
+}
+
+// Cleanup function
+export function cleanup() {
+    if (recordingInterval) {
+        clearTimeout(recordingInterval);
+    }
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+    }
+    audioChunks = [];
+    dotNetHelper = null;
 }
