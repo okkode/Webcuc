@@ -1,4 +1,5 @@
 @using MudBlazor
+@using MudBlazor
 @using GdeWeb.Interfaces
 @using GdeWebModels
 @using GdeWeb.Dialogs
@@ -134,7 +135,8 @@
             ["Color"] = Color.Error
         };
 
-        var dialog = await DialogService.ShowAsync<UpdateDialog>("Jegyzet törlése", parameters);
+        // Itt cseréld le UpdateDialog-ot ConfirmDialog-ra
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>("Jegyzet törlése", parameters);
         var result = await dialog.Result;
 
         if (!result.Canceled)
@@ -146,6 +148,7 @@
                 {
                     SnackbarService.ShowSnackbar(Severity.Success, "Jegyzet sikeresen törölve!", 3000);
                     await LoadNotes();
+                    StateHasChanged();
                 }
                 else
                 {
